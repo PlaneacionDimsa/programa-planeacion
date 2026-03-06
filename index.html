@@ -445,6 +445,8 @@
   }
   #upload-status-bar.error { color: var(--danger); }
   #upload-status { display: none; } /* span fantasma para no romper JS */
+    .form-row { grid-template-columns: 1fr 1fr; }
+  }
 
   /* ── RESPONSIVE ─────────────────────────────────────────────────── */
 
@@ -608,6 +610,7 @@
 <div class="tabs-bar">
   <button class="tab-btn active" id="tab-dashboard" onclick="switchTab('dashboard')">📊 Dashboard</button>
   <button class="tab-btn" id="tab-avances" onclick="switchTab('avances')">📋 Avances</button>
+
 </div>
 
 <!-- TAB: DASHBOARD -->
@@ -1614,6 +1617,7 @@ function initFirebase() {
         if (data.machines && data.machines.length > 0) {
           DATA.length = 0;
           data.machines.forEach(m => DATA.push(m));
+          filtrarOPsCerradas();
           setStatus(`✓ ${data.filename || 'datos guardados'} — ${data.machines.length} máquinas`);
           render();
         }
@@ -1641,6 +1645,11 @@ function initFirebase() {
             HISTORIAL[k] = val;
           }
         });
+        // Re-filtrar OPs cerradas ahora que el historial está actualizado
+        if (DATA.length > 0) {
+          filtrarOPsCerradas();
+          render();
+        }
       }
     });
 
@@ -1655,6 +1664,27 @@ render();
 
 
 // ─── EXCEL PARSER ─────────────────────────────────────────────────
+// Filtra del DATA cargado las OPs que ya fueron cerradas/eliminadas manualmente
+function filtrarOPsCerradas() {
+  let totalBorradas = 0;
+  DATA.forEach(m => {
+    const antes = m.orders.length;
+    m.orders = m.orders.filter(o => {
+      const hKey = m.machine + '||' + o.OP + '||' + (o.Suborden || '');
+      const h = HISTORIAL[hKey];
+      return !(h && (h.cerradaManualmente || h.eliminada));
+    });
+    const borradas = antes - m.orders.length;
+    if (borradas > 0) {
+      totalBorradas += borradas;
+      m.num_orders = m.orders.length;
+      m.total_kg = parseFloat(m.orders.reduce((a, o) => a + (o.Kg || 0), 0).toFixed(2));
+      m.computed_total_hrs = parseFloat(m.orders.reduce((a, o) => a + (o.Tiempo_hrs || 0), 0).toFixed(2));
+    }
+  });
+  return totalBorradas;
+}
+
 let _statusTimer = null;
 function setStatus(msg, isError = false) {
   const bar = document.getElementById('upload-status-bar');
@@ -1690,16 +1720,19 @@ function loadExcel(file) {
       if (parsed.length === 0) throw new Error('No se encontraron máquinas');
       DATA.length = 0;
       parsed.forEach(m => DATA.push(m));
+      const borradas = filtrarOPsCerradas();
       selectedMachine = null;
       document.getElementById('detail-panel').classList.remove('open');
       render();
-      setStatus(`✓ ${file.name} — ${parsed.length} máquinas cargadas`);
+      const msgExtra = borradas > 0 ? ` (${borradas} OP${borradas>1?'s':''} cerrada${borradas>1?'s':''} omitida${borradas>1?'s':''})` : '';
+      setStatus(`✓ ${file.name} — ${parsed.length} máquinas cargadas${msgExtra}`);
 
       // ── Guardar workbook original para exportar con formato ──
       window._originalWB = wb;
       window._originalSheetName = sheetName;
       window._originalFilename = file.name;
-      // Guardar en Firebase
+      // Guardar en Firebase — DESHABILITADO (modo prueba)
+      /*
       if (window._db) {
         const clean = JSON.parse(JSON.stringify(parsed, (k,v) => (typeof v === 'number' && isNaN(v)) ? null : v));
         window._db.collection('programa').doc('actual').set({
@@ -1708,6 +1741,7 @@ function loadExcel(file) {
           updatedAt: new Date().toISOString()
         }).catch(e => console.error('Error guardando en Firebase:', e));
       }
+      */
     } catch(err) {
       setStatus('✗ Error: ' + err.message, true);
     }
@@ -1904,6 +1938,7 @@ window.addEventListener('load', initFirebase);
     appId: "1:478260820872:web:7a4ecb5f3d1757fd63983d"
   });
   initFirebase();
+
 </script>
 </body>
 </html>
